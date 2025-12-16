@@ -1,0 +1,5 @@
+{
+  "name": "智慧影像編輯器",
+  "description": "強大的影像編輯器，具備自由裁切、調整像素尺寸以及物件變形與畫布合成功能。",
+  "requestFramePermissions": []
+}
