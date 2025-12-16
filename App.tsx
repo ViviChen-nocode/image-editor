@@ -1149,6 +1149,22 @@ const App: React.FC = () => {
                      >
                          返回編輯
                      </button>
+                     <button 
+                        onClick={() => {
+                            setOriginalImage(null);
+                            setCurrentImage(null);
+                            setStep(EditorStep.UPLOAD);
+                            setHistory([]);
+                            setCrop(undefined);
+                            setCompletedCrop(undefined);
+                            setDimensions({ width: 0, height: 0 });
+                            setObjectPosition(null);
+                            setObjectScale(1);
+                        }}
+                        className="w-full border-2 border-blue-500 text-blue-600 hover:bg-blue-50 py-3 rounded-xl transition-all flex items-center justify-center gap-2 font-medium"
+                     >
+                         <Upload size={18} /> 再編輯一張圖片
+                     </button>
                  </div>
              </div>
         </div>
