@@ -247,9 +247,12 @@ const App: React.FC = () => {
         
         const img = await createImage(croppedImage);
         
+        // 設定畫布尺寸為裁切後的圖片尺寸
         setDimensions({ width: img.width, height: img.height });
         setOriginalAspect(img.width / img.height);
         
+        // 裁切後的圖片應該完全填滿畫布（因為畫布尺寸就是圖片尺寸）
+        setResizeMode('stretch');
         setObjectPosition(null);
         setObjectScale(1);
 
