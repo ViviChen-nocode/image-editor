@@ -9,6 +9,50 @@ export const createImage = (url: string): Promise<HTMLImageElement> =>
     image.src = url;
   });
 
+/**
+ * Checks if an image has transparency by sampling pixels
+ */
+export const hasTransparency = async (imageSrc: string): Promise<boolean> => {
+  try {
+    const image = await createImage(imageSrc);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
+    if (!ctx) {
+      return false;
+    }
+
+    canvas.width = image.width;
+    canvas.height = image.height;
+    ctx.drawImage(image, 0, 0);
+
+    // Sample pixels to check for transparency
+    // We sample a grid of pixels to avoid checking every single pixel (performance)
+    const sampleSize = Math.min(100, Math.max(10, Math.floor(Math.sqrt(image.width * image.height) / 10)));
+    const stepX = Math.max(1, Math.floor(image.width / sampleSize));
+    const stepY = Math.max(1, Math.floor(image.height / sampleSize));
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    for (let y = 0; y < image.height; y += stepY) {
+      for (let x = 0; x < image.width; x += stepX) {
+        const index = (y * image.width + x) * 4;
+        const alpha = data[index + 3];
+        // If any pixel has alpha < 255, the image has transparency
+        if (alpha < 255) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error checking transparency:', error);
+    return false;
+  }
+};
+
 export const getCroppedImg = async (
   imageSrc: string,
   pixelCrop: PixelCrop,

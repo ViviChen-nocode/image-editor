@@ -21,7 +21,7 @@ import {
   Layers
 } from 'lucide-react';
 import { Layout, LayoutCell, CellImage, ExportSettings } from '../types';
-import { createImage, compressImageToSize } from '../utils/imageProcessing';
+import { createImage, compressImageToSize, hasTransparency } from '../utils/imageProcessing';
 
 // 預設尺寸（與 ImageEditor 共用）
 type PresetFormat = { name: string; w: number; h: number; label: string };
@@ -130,7 +130,7 @@ export const CollageEditor: React.FC = () => {
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [exportSettings, setExportSettings] = useState<ExportSettings>({
     format: 'image/jpeg',
-    quality: 0.8,
+    quality: 1.0, // 預設最高品質（100%）
     maxSizeKB: undefined,
     maintainAspectRatio: true
   });
@@ -263,8 +263,10 @@ export const CollageEditor: React.FC = () => {
     if (files.length > 0 && files[0].type.startsWith('image/')) {
       const file = files[0];
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const imageSrc = event.target?.result as string;
+        // Check if the image has transparency
+        const hasTrans = await hasTransparency(imageSrc);
         setCellImages(prev => {
           const filtered = prev.filter(img => img.cellId !== cellId);
           return [...filtered, {
@@ -272,7 +274,8 @@ export const CollageEditor: React.FC = () => {
             imageSrc,
             scale: 1.0,
             positionX: 0,
-            positionY: 0
+            positionY: 0,
+            hasTransparency: hasTrans
           }];
         });
         setActiveCellId(cellId);
@@ -287,8 +290,10 @@ export const CollageEditor: React.FC = () => {
     if (files && files.length > 0 && files[0].type.startsWith('image/')) {
       const file = files[0];
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const imageSrc = event.target?.result as string;
+        // Check if the image has transparency
+        const hasTrans = await hasTransparency(imageSrc);
         setCellImages(prev => {
           const filtered = prev.filter(img => img.cellId !== cellId);
           return [...filtered, {
@@ -296,7 +301,8 @@ export const CollageEditor: React.FC = () => {
             imageSrc,
             scale: 1.0,
             positionX: 0,
-            positionY: 0
+            positionY: 0,
+            hasTransparency: hasTrans
           }];
         });
         setActiveCellId(cellId);
@@ -390,9 +396,18 @@ export const CollageEditor: React.FC = () => {
     
     if (!ctx) return;
 
-    // 繪製白色背景
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Check if all images have transparency and exporting as PNG
+    const allImagesHaveTransparency = cellImages.length > 0 && 
+      cellImages.every(img => img.hasTransparency === true);
+    const shouldPreserveTransparency = allImagesHaveTransparency && 
+      exportSettings.format === 'image/png';
+
+    // 繪製背景（如果所有圖片都是透明PNG且匯出PNG，則保持透明）
+    if (exportSettings.format === 'image/jpeg' || !shouldPreserveTransparency) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    // If shouldPreserveTransparency is true, don't fill background (transparent)
 
     // 繪製每個框格的圖片
     for (const cell of selectedLayout.cells) {

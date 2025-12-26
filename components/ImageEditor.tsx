@@ -26,7 +26,7 @@ import {
   Plus
 } from 'lucide-react';
 import { EditorStep, ExportSettings, PixelCrop, ResizeMode } from '../types';
-import { getCroppedImg, resizeImageCanvas, compressImageToSize, createImage } from '../utils/imageProcessing';
+import { getCroppedImg, resizeImageCanvas, compressImageToSize, createImage, hasTransparency } from '../utils/imageProcessing';
 
 // --- Presets Data ---
 type PresetFormat = { name: string; w: number; h: number; label: string };
@@ -69,7 +69,7 @@ function centerAspectCrop(
     makeAspectCrop(
       {
         unit: '%',
-        width: 90,
+        width: 100,
       },
       aspect,
       mediaWidth,
@@ -90,6 +90,7 @@ export const ImageEditor: React.FC = () => {
   // Images
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
+  const [hasOriginalTransparency, setHasOriginalTransparency] = useState<boolean>(false);
   
   // Cropper State (Global / Step 1)
   const [crop, setCrop] = useState<Crop>();
@@ -127,7 +128,7 @@ export const ImageEditor: React.FC = () => {
   // Export State
   const [exportSettings, setExportSettings] = useState<ExportSettings>({
     format: 'image/png',
-    quality: 0.9,
+    quality: 1.0, // 預設最高品質（100%）
     maxSizeKB: undefined,
     maintainAspectRatio: true
   });
@@ -168,7 +169,7 @@ export const ImageEditor: React.FC = () => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       const reader = new FileReader();
-      reader.addEventListener('load', () => {
+      reader.addEventListener('load', async () => {
         const result = reader.result as string;
         setOriginalImage(result);
         setHistory([result]);
@@ -178,6 +179,10 @@ export const ImageEditor: React.FC = () => {
         setCompletedCrop(undefined);
         setObjectScale(1);
         setObjectPosition(null);
+        
+        // Check if the original image has transparency
+        const hasTrans = await hasTransparency(result);
+        setHasOriginalTransparency(hasTrans);
         
         createImage(result).then(img => {
             setDimensions({ width: img.width, height: img.height });
@@ -222,21 +227,31 @@ export const ImageEditor: React.FC = () => {
             height: completedCrop.height * scaleY
         };
 
-        const croppedImage = await getCroppedImg(sourceImage, actualCrop);
+        // Preserve transparency if original image has transparency
+        const bgColor = hasOriginalTransparency ? 'rgba(0,0,0,0)' : undefined;
+        const croppedImage = await getCroppedImg(sourceImage, actualCrop, bgColor);
         pushHistory(croppedImage);
         
         const img = await createImage(croppedImage);
         setDimensions({ width: img.width, height: img.height });
         setOriginalAspect(img.width / img.height);
-        setResizeMode('stretch');
+        setResizeMode('contain');
         setObjectPosition(null);
         setObjectScale(1);
+        // If original image has transparency, set canvas color to transparent for preview
+        if (hasOriginalTransparency) {
+            setCanvasColor('transparent');
+        }
         setStep(EditorStep.EDIT);
       } catch (e) {
         console.error(e);
       }
     } else if (sourceImage && !completedCrop) {
         setCurrentImage(sourceImage);
+        // If original image has transparency, set canvas color to transparent for preview
+        if (hasOriginalTransparency) {
+            setCanvasColor('transparent');
+        }
         setStep(EditorStep.EDIT);
     }
   };
@@ -255,7 +270,9 @@ export const ImageEditor: React.FC = () => {
                 height: completedCrop.height * scaleY
             };
 
-            const croppedImage = await getCroppedImg(currentImage, actualCrop);
+            // Preserve transparency if original image has transparency
+            const bgColor = hasOriginalTransparency ? 'rgba(0,0,0,0)' : undefined;
+            const croppedImage = await getCroppedImg(currentImage, actualCrop, bgColor);
             pushHistory(croppedImage);
             
             const img = await createImage(croppedImage);
@@ -431,12 +448,19 @@ export const ImageEditor: React.FC = () => {
   const handleApplyResize = async () => {
     if(!currentImage) return;
     try {
+        // If original image has transparency, use transparent background
+        // unless user explicitly changed the canvas color to something other than white
+        let bgColor = canvasColor;
+        if (hasOriginalTransparency && canvasColor === '#FFFFFF') {
+            bgColor = 'transparent';
+        }
+        
         const resized = await resizeImageCanvas(
             currentImage, 
             dimensions.width, 
             dimensions.height, 
             resizeMode,
-            canvasColor,
+            bgColor,
             objectScale,
             objectPosition
         );
@@ -455,17 +479,28 @@ export const ImageEditor: React.FC = () => {
       if (exportSettings.maxSizeKB) {
           blob = await compressImageToSize(currentImage, exportSettings.format, exportSettings.maxSizeKB);
       } else {
-          const res = await fetch(currentImage);
-           const canvas = document.createElement('canvas');
-           const img = await createImage(currentImage);
-           canvas.width = img.width;
-           canvas.height = img.height;
-           const ctx = canvas.getContext('2d');
-           if(!ctx) return;
+          // Check if currentImage still has transparency (it might have been processed by resizeImageCanvas)
+          const currentImageHasTransparency = await hasTransparency(currentImage);
+          const shouldPreserveTransparency = (hasOriginalTransparency || currentImageHasTransparency) && exportSettings.format === 'image/png';
+          
+          const canvas = document.createElement('canvas');
+          const img = await createImage(currentImage);
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          if(!ctx) return;
+           
            if(exportSettings.format === 'image/jpeg') {
+               // JPEG doesn't support transparency, always use white background
+               ctx.fillStyle = '#FFF';
+               ctx.fillRect(0,0, canvas.width, canvas.height);
+           } else if (!shouldPreserveTransparency) {
+               // For PNG without transparency, use white background
                ctx.fillStyle = '#FFF';
                ctx.fillRect(0,0, canvas.width, canvas.height);
            }
+           // If shouldPreserveTransparency is true, don't fill background (transparent)
+           
            ctx.drawImage(img, 0, 0);
            blob = await new Promise(r => canvas.toBlob(r, exportSettings.format, exportSettings.quality));
       }
@@ -515,13 +550,23 @@ export const ImageEditor: React.FC = () => {
             aspect={aspectRatio}
             className="max-h-[60vh]"
           >
-            <img 
-                ref={imgRef}
-                alt="Crop me"
-                src={originalImage} 
-                onLoad={onImageLoad}
-                style={{ maxHeight: '60vh', objectFit: 'contain' }}
-            />
+            <div
+              style={{
+                display: 'inline-block',
+                backgroundImage: hasOriginalTransparency
+                  ? `linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)`
+                  : 'none',
+                backgroundSize: hasOriginalTransparency ? '20px 20px' : 'auto',
+              }}
+            >
+              <img 
+                  ref={imgRef}
+                  alt="Crop me"
+                  src={originalImage} 
+                  onLoad={onImageLoad}
+                  style={{ maxHeight: '60vh', objectFit: 'contain', display: 'block' }}
+              />
+            </div>
           </ReactCrop>
         )}
       </div>
@@ -922,6 +967,24 @@ export const ImageEditor: React.FC = () => {
                         <div>
                              <label className="text-xs text-gray-600 uppercase tracking-wider font-semibold mb-2 block">畫布底色 (Background)</label>
                              <div className="flex gap-2">
+                                 {/* 如果原始圖片有透明背景，顯示「原始透明」選項 */}
+                                 {hasOriginalTransparency && (
+                                     <button
+                                        onClick={() => setCanvasColor('transparent')}
+                                        className={`w-10 h-10 rounded-full border-2 relative overflow-hidden ${
+                                            canvasColor === 'transparent' 
+                                                ? 'border-blue-500 ring-2 ring-blue-500/50' 
+                                                : 'border-gray-300'
+                                        }`}
+                                        style={{
+                                            backgroundImage: `linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)`,
+                                            backgroundSize: '8px 8px',
+                                            backgroundColor: 'transparent'
+                                        }}
+                                        title="原始透明 (保持原始圖片的透明背景)"
+                                     >
+                                     </button>
+                                 )}
                                  {['#FFFFFF', '#000000', '#00FF00'].map(c => (
                                      <button
                                         key={c}
@@ -976,8 +1039,22 @@ export const ImageEditor: React.FC = () => {
     <div className="max-w-4xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-lg">
              <div className="p-8 bg-gray-50 flex flex-col items-center justify-center border-r border-gray-200 relative">
-                 <div className="absolute inset-0 z-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCI+PHJlY3Qgd2lkdGg9IjEwIiBoZWlnaHQ9IjEwIiBmaWxsPSIjZmZmIi8+PHJlY3QgeD0iMTAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iIzMzMyIvPjxyZWN0IHk9IjEwIiB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9IiMzMzMiLz48cmVjdCB4PSIxMCIgeT0iMTAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==')]"></div>
-                 {currentImage && <img src={currentImage} className="relative z-10 max-w-full max-h-[300px] shadow-lg rounded-lg object-contain" alt="Final" />}
+                 {currentImage && (
+                   <div className="relative z-10 inline-block">
+                     <img 
+                       src={currentImage} 
+                       className="relative max-w-full max-h-[300px] shadow-lg rounded-lg object-contain block"
+                       style={{
+                         backgroundColor: (hasOriginalTransparency && canvasColor === 'transparent') ? 'transparent' : undefined,
+                         backgroundImage: (hasOriginalTransparency && canvasColor === 'transparent')
+                           ? `linear-gradient(45deg, #cbd5e1 25%, transparent 25%), linear-gradient(-45deg, #cbd5e1 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #cbd5e1 75%), linear-gradient(-45deg, transparent 75%, #cbd5e1 75%)`
+                           : undefined,
+                         backgroundSize: (hasOriginalTransparency && canvasColor === 'transparent') ? '20px 20px' : undefined,
+                       }}
+                       alt="Final" 
+                     />
+                   </div>
+                 )}
                  <div className="relative z-10 mt-4 text-gray-600 text-sm bg-white/80 px-3 py-1 rounded-full border border-gray-200">
                     {dimensions.width} x {dimensions.height} px
                  </div>
@@ -1024,18 +1101,29 @@ export const ImageEditor: React.FC = () => {
                      {exportSettings.format === 'image/jpeg' && (
                          <div>
                              <div className="flex justify-between mb-2">
-                                <label className="text-sm font-medium text-gray-700">品質</label>
-                                <span className="text-sm text-gray-600">{Math.round(exportSettings.quality * 100)}%</span>
+                                <label className="text-sm font-medium text-gray-700">
+                                  品質 <span className="text-xs text-gray-500">(預設: 100% 最高品質)</span>
+                                </label>
+                                <span className="text-sm font-semibold text-blue-600">{Math.round(exportSettings.quality * 100)}%</span>
                              </div>
                              <input 
                                 type="range" 
                                 min="0.1" 
                                 max="1" 
-                                step="0.1" 
+                                step="0.05" 
                                 value={exportSettings.quality}
                                 onChange={(e) => setExportSettings(s => ({...s, quality: parseFloat(e.target.value)}))}
                                 className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
                             />
+                            <div className="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>較小檔案</span>
+                                <span>較高品質</span>
+                            </div>
+                            {exportSettings.quality < 1.0 && (
+                                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                                    <AlertCircle size={12} /> 目前品質為 {Math.round(exportSettings.quality * 100)}%，檔案會比原始圖片小
+                                </p>
+                            )}
                          </div>
                      )}
 
@@ -1125,4 +1213,5 @@ export const ImageEditor: React.FC = () => {
     </div>
   );
 };
+
 

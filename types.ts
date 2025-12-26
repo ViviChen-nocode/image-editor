@@ -61,4 +61,5 @@ export interface CellImage {
   scale: number; // 1.0 = 100%
   positionX: number; // percentage offset from center
   positionY: number; // percentage offset from center
+  hasTransparency?: boolean; // whether the image has transparent background
 }
