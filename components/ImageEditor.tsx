@@ -524,7 +524,7 @@ export const ImageEditor: React.FC = () => {
 
   // --- Renders ---
   const renderUpload = () => (
-    <div className="flex flex-col items-center justify-center h-96 border-2 border-dashed border-gray-300 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 hover:border-blue-400 hover:from-blue-50 hover:to-blue-100 transition-all duration-300">
+    <div className="flex flex-col items-center justify-center h-48 border-2 border-dashed border-gray-300 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100 hover:border-blue-400 hover:from-blue-50 hover:to-blue-100 transition-all duration-300">
       <div className="text-center p-8">
         <div className="bg-blue-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-blue-500/20">
           <Upload className="text-white w-8 h-8" />
@@ -591,12 +591,29 @@ export const ImageEditor: React.FC = () => {
         
         <div className="flex-grow"></div>
 
-        <button 
-            onClick={handleApplyCrop}
-            className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium transition-colors ml-auto shadow-md"
-        >
-            <Scissors size={18} /> 執行裁切
-        </button>
+        <div className="flex flex-col gap-2 items-end">
+          <button 
+              onClick={handleApplyCrop}
+              className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium transition-colors shadow-md"
+          >
+              <Scissors size={18} /> 執行裁切
+          </button>
+          <button 
+              onClick={() => {
+                  setOriginalImage(null);
+                  setCurrentImage(null);
+                  setStep(EditorStep.UPLOAD);
+                  setHistory([]);
+                  setCrop(undefined);
+                  setCompletedCrop(undefined);
+                  setHasOriginalTransparency(false);
+                  setAspectRatio(undefined);
+              }}
+              className="flex items-center gap-2 border border-gray-300 text-gray-600 hover:text-red-500 hover:border-red-300 px-4 py-1.5 rounded-lg transition-colors text-sm"
+          >
+              <Trash2 size={16}/> 捨棄並重新開始
+          </button>
+        </div>
       </div>
     </div>
   );
